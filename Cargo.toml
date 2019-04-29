@@ -1,0 +1,8 @@
+[package]
+name = "quadcopter-sim"
+version = "0.1.0"
+authors = ["Daan Middelkoop <daantje676@gmail.com>"]
+edition = "2018"
+
+[dependencies]
+three = "0.4.0"
