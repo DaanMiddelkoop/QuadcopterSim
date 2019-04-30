@@ -25,10 +25,12 @@ fn main() {
     let mut timer = Timer::new();
 
     while window.update() {
-        let dt = timer.elapsed();
+        let dt = timer.elapsed() as f64;
         timer.reset();
 
-        quadcopter.update(dt);
+        for _ in 0..100 {
+            quadcopter.update(dt / 100.0);
+        }
         quadcopter.draw();
         window.render(&camera);
     }

@@ -2,17 +2,17 @@ use crate::vector::Vector3f;
 use crate::cube::Cube;
 use crate::controls::Controller;
 
-const ENGINE_THRUST: f32 = 100.0; // newton
+const ENGINE_THRUST: f64 = 30.0; // newton
 
 struct Corner {
     pos: Vector3f,
     force: Vector3f,
-    mass: f32,
+    mass: f64,
     cube: Cube,
 }
 
 impl Corner {
-    fn new(x: f32, y: f32, z: f32, color: u32, window: &mut three::Window) -> Corner {
+    fn new(x: f64, y: f64, z: f64, color: u32, window: &mut three::Window) -> Corner {
 
         Corner {
             pos: Vector3f::new(x, y, z),
@@ -46,7 +46,7 @@ pub struct QuadCopter {
 }
 
 impl QuadCopter {
-    pub fn new(x: f32, y: f32, z: f32, window: &mut three::Window) -> QuadCopter {
+    pub fn new(x: f64, y: f64, z: f64, window: &mut three::Window) -> QuadCopter {
 
 
         QuadCopter {
@@ -60,7 +60,7 @@ impl QuadCopter {
         }
     }
 
-    pub fn update(&mut self, dt: f32) {
+    pub fn update(&mut self, dt: f64) {
         let total_mass = self.lf.mass + self.rf.mass + self.lb.mass + self.rb.mass;
 
         self.lf.calc_grav_force();
@@ -77,10 +77,10 @@ impl QuadCopter {
         let normal = ab.cross(&ac).normalize().mult(-1.0);
 
 
-        self.lf.force.add(&normal.mult(self.controller.lf * ENGINE_THRUST));
-        self.rf.force.add(&normal.mult(self.controller.rf * ENGINE_THRUST));
-        self.lb.force.add(&normal.mult(self.controller.lb * ENGINE_THRUST));
-        self.rb.force.add(&normal.mult(self.controller.rb * ENGINE_THRUST));
+        self.lf.force = self.lf.force.add(&normal.mult(self.controller.lf * ENGINE_THRUST));
+        self.rf.force = self.rf.force.add(&normal.mult(self.controller.rf * ENGINE_THRUST));
+        self.lb.force = self.lb.force.add(&normal.mult(self.controller.lb * ENGINE_THRUST));
+        self.rb.force = self.rb.force.add(&normal.mult(self.controller.rb * ENGINE_THRUST));
 
         // calculating torque.
         let total_engine_power = (self.controller.lf + self.controller.rf + self.controller.lb + self.controller.rb);
@@ -94,6 +94,7 @@ impl QuadCopter {
         let relative_rotational_force_position = rotational_axis.sub(&rotational_force_position);
         
 
+
         println!("relative rotational force {} {} {}", relative_rotational_force_position.x, relative_rotational_force_position.y, relative_rotational_force_position.z);
         let total_engine_force = total_engine_power * ENGINE_THRUST;
         
@@ -105,13 +106,38 @@ impl QuadCopter {
         // t = I * a where t=torque, I = moment of inertia, a = angular velocity.
         // -> a = I * t
         // = m * r^2 * t
-        println!("torque: {} {} {}", torque.x, torque.y, torque.z);
+        // Moment of inertia I = the sum of mass * (distance to rotational axis)^2
 
         
+        let I = 4.0 * (self.lf.mass * (rotational_axis.sub(&self.lf.pos).length()));
+        // angular acceleration a = torque / I
+        let ang_accel = torque.mult(1.0 / I); // In radians / s^2
 
+        println!("ang accel {}, {}, {}", ang_accel.x, ang_accel.y, ang_accel.z);
+        self.ang_vel = self.ang_vel.add(&ang_accel.mult(dt));
+
+        println!("torque: {} {} {}", torque.x, torque.y, torque.z);
 
         let total_force = self.lf.force.add(&self.rf.force.add(&self.lb.force.add(&self.rb.force)));
+
+        println!("total force: {}, {}, {}", total_force.x, total_force.y, total_force.z);
         let accel = total_force.mult(1.0 / total_mass);
+
+
+        let rel_lf = rotational_axis.sub(&self.lf.pos);
+        let rel_rf = rotational_axis.sub(&self.rf.pos);
+        let rel_lb = rotational_axis.sub(&self.lb.pos);
+        let rel_rb = rotational_axis.sub(&self.rb.pos);
+
+        let lf_rf = self.lf.pos.sub(&self.rf.pos);
+        let lf_lb = self.lf.pos.sub(&self.lb.pos);
+        let lf_rb = self.lf.pos.sub(&self.rb.pos);
+
+        // Rotation
+        self.lf.pos = rotational_axis.add(&QuadCopter::angular_vel_to_position_diff(rotational_axis.sub(&self.lf.pos), self.ang_vel.mult(dt)));
+        self.rf.pos = rotational_axis.add(&QuadCopter::angular_vel_to_position_diff(rotational_axis.sub(&self.rf.pos), self.ang_vel.mult(dt)));
+        self.lb.pos = rotational_axis.add(&QuadCopter::angular_vel_to_position_diff(rotational_axis.sub(&self.lb.pos), self.ang_vel.mult(dt)));
+        self.rb.pos = rotational_axis.add(&QuadCopter::angular_vel_to_position_diff(rotational_axis.sub(&self.rb.pos), self.ang_vel.mult(dt)));
 
         self.vel = self.vel.add(&accel.mult(dt));
 
@@ -120,7 +146,27 @@ impl QuadCopter {
         self.lb.pos = self.lb.pos.add(&self.vel.mult(dt));
         self.rb.pos = self.rb.pos.add(&self.vel.mult(dt));
 
+        println!("quadcopter_position: {}, {}, {}", rotational_axis.x, rotational_axis.y, rotational_axis.z);
 
+
+        println!("lengths from center: {}, {}, {}, {}", rel_lf.length(), rel_rf.length(), rel_lb.length(), rel_rb.length());
+        println!("lengths from lf: {}, {}, {}", lf_rf.length(), lf_lb.length(), lf_rb.length());
+
+
+
+    }
+
+    fn angular_vel_to_position_diff(v: Vector3f, rotation: Vector3f) -> Vector3f {
+        let original_len = v.length();
+        let rotation_angle = rotation.length();
+        let axis = rotation.normalize();
+        if rotation_angle > 0.0 {
+            let new_v = v.mult(-rotation_angle.cos()).add(&axis.cross(&v).mult(rotation_angle.sin())).add(&axis.mult(axis.dot(&v)).mult(1.0 - rotation_angle.cos())).set_length(original_len);
+            println!("old len: {}, new len: {}", v.length(), new_v.length());
+            new_v
+        } else {
+            v
+        }
     }
 
     pub fn draw(&mut self) {
